@@ -1,6 +1,7 @@
 Tasks = new Mongo.Collection("tasks");
 
 if (Meteor.isClient) {
+  Meteor.subscribe("tasks");
   // This code only runs on the client
   Template.body.helpers({
     tasks: function() {
@@ -23,7 +24,7 @@ if (Meteor.isClient) {
     "submit .new-task": function(event){
       // Function calls to addTask method when the task form is submitted
       var text = event.target.text.value;
-      Meteor.call("addTask, text");
+      Meteor.call("addTask", text);
       // Clear form
       event.target.text.value = "";
       // Prevent default form submit
@@ -41,6 +42,16 @@ if (Meteor.isClient) {
     },
     "click .delete": function(){
       Meteor.call("deleteTask", this._id)
+    },
+    "click .toggle-private": function(){
+      Meteor.call("setPrivate", this._id, ! this.private);
+    }
+  });
+
+  Template.task.helpers({
+    // Check if the current user is the task owner
+    isOwner: function() {
+      return this.owner === Meteor.userId();
     }
   });
 
@@ -62,10 +73,39 @@ Meteor.methods({
     });
   },
   deleteTask: function(taskId) {
+    // If the task is private, make sure only the owner can delete it
+    var task = Tasks.findOne(taskId);
+    if (task.private && task.userID !== Meteor.userId()) {
+      throw new Meteor.Error("not-authorized");
+    }
     Tasks.remove(taskId);
   },
   setChecked: function(taskId, setChecked) {
+    var task = Tasks.findOne(taskId);
+    if (task.private && task.owner !== Meteor.userId()) {
+      throw new Meteor.Error("not-authorized");
+    }
     // Set the checked property to the opposite of its current value
     Tasks.update(taskId, { $set: {checked: setChecked}});
+  },
+  setPrivate: function (taskId, setToPrivate) {
+    var task = Tasks.findOne(taskId);
+    // Only the task owner can make a task private
+    if (task.owner !== Meteor.userId()) {
+      throw new Meteor.Error("not-authorized");
+    }
+    Tasks.update(taskId, { $set: { private: setToPrivate}});
   }
 });
+
+if(Meteor.isServer) {
+  Meteor.publish("tasks", function() {
+    // Only publish tasks that are public or belong to the current user
+    return Tasks.find({
+      $or: [
+        { private: { $ne: true}},
+        { owner: this.userId}
+      ]
+    });
+  });
+}
